@@ -81,11 +81,13 @@ export default function Estadisticas() {
                   <XAxis dataKey="dia" tick={{ fill: '#888', fontSize: 11 }} />
                   <YAxis tickFormatter={fmt} tick={{ fill: '#888', fontSize: 11 }} width={40} />
                   <Tooltip
+                    cursor={false}
                     formatter={(v) => v.toLocaleString('es-AR', {
                       style: 'currency', currency: 'ARS', maximumFractionDigits: 0
                     })}
                     contentStyle={{ background: '#1a1a1a', border: '1px solid #333', borderRadius: 8 }}
                     labelStyle={{ color: '#e8c547' }}
+                    itemStyle={{ color: '#f0f0f0' }}
                   />
                   <Bar dataKey="total" fill="#e8c547" radius={[4, 4, 0, 0]} />
                 </BarChart>
