@@ -52,7 +52,6 @@ export default function ResumenMensual({ gastos }) {
               formatter={(v) => fmt(v)}
               contentStyle={{ background: '#1a1a1a', border: '1px solid #444', borderRadius: 8 }}
               labelStyle={{ color: '#e8c547' }}
-              itemStyle={{ color: '#f0f0f0' }}
             />
           </PieChart>
         </ResponsiveContainer>
