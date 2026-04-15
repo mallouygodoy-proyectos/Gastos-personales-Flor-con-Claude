@@ -1,0 +1,6 @@
+fastapi
+uvicorn
+httpx
+PyJWT
+cryptography
+python-telegram-bot>=20.0
