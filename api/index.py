@@ -98,7 +98,7 @@ class Gasto(BaseModel):
     monto:       float
     detalle:     str
     categoria:   str
-    usuario:     Optional[str] = "Adrian"
+    usuario:     Optional[str] = "Flor"
     metodo_pago: Optional[str] = "Efectivo"
     fecha:       Optional[str] = None
     notas:       Optional[str] = ""
