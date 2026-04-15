@@ -50,8 +50,15 @@ export default function ResumenMensual({ gastos }) {
             </Pie>
             <Tooltip
               formatter={(v) => fmt(v)}
-              contentStyle={{ background: '#1a1a1a', border: '1px solid #444', borderRadius: 8 }}
-              labelStyle={{ color: '#e8c547' }}
+              contentStyle={{
+                background: '#2a2a2a',
+                border: '1px solid #e8c547',
+                borderRadius: 8,
+                color: '#f0f0f0'
+              }}
+              labelStyle={{ color: '#e8c547', fontWeight: 700 }}
+              itemStyle={{ color: '#f0f0f0' }}
+              wrapperStyle={{ color: '#f0f0f0' }}
             />
           </PieChart>
         </ResponsiveContainer>
