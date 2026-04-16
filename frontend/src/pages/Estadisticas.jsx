@@ -81,7 +81,7 @@ export default function Estadisticas() {
                   <XAxis dataKey="dia" tick={{ fill: '#888', fontSize: 11 }} />
                   <YAxis tickFormatter={fmt} tick={{ fill: '#888', fontSize: 11 }} width={40} />
                   <Tooltip
-                    cursor={{ fill: 'transparent' }
+                    cursor={{ fill: 'transparent' }}
                     formatter={(v) => v.toLocaleString('es-AR', {
                       style: 'currency', currency: 'ARS', maximumFractionDigits: 0
                     })}
