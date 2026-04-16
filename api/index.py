@@ -191,7 +191,9 @@ async def get_categorias():
 
 
 # --- BOT TELEGRAM ---
-ESPERANDO_CATEGORIA = 1
+import urllib.request as _urllib
+
+ESPERANDO = {}  # estado en memoria por user_id
 
 CATEGORIAS_TECLADO = [
     ["Supermercado", "Salidas", "Almuerzos"],
@@ -204,112 +206,92 @@ CATEGORIAS_TECLADO = [
     ["Indumentaria", "Kiosco",    "Otros"],
 ]
 
+def tg_send(chat_id: int, text: str, keyboard=None):
+    payload = {"chat_id": chat_id, "text": text}
+    if keyboard:
+        payload["reply_markup"] = json.dumps({
+            "keyboard": keyboard,
+            "one_time_keyboard": True,
+            "resize_keyboard": True
+        })
+    else:
+        payload["reply_markup"] = json.dumps({"remove_keyboard": True})
+    data = json.dumps(payload).encode()
+    req = _urllib.Request(
+        f"https://api.telegram.org/bot{TOKEN_TG}/sendMessage",
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST"
+    )
+    with _urllib.urlopen(req) as r:
+        return json.loads(r.read())
 
 def parsear_fecha(texto: str):
     match = re.search(r'(\d{1,2}/\d{1,2}(/\d{2,4})?)', texto)
     if match:
         fecha_str = match.group(1)
         partes = fecha_str.split("/")
-        dia = int(partes[0])
-        mes = int(partes[1])
+        dia  = int(partes[0])
+        mes  = int(partes[1])
         anio = int(partes[2]) if len(partes) > 2 else datetime.now().year
         if anio < 100:
             anio += 2000
         return datetime(anio, mes, dia).date().isoformat(), fecha_str
     return None, None
 
-
-async def inicio_gasto(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    usuario = update.message.from_user.username
-    if usuario not in USUARIOS_TG:
-        return ConversationHandler.END
-
-    texto  = update.message.text.strip()
-    partes = texto.split(" ")
-
-    if len(partes) < 2:
-        await update.message.reply_text("Enviame el gasto así: '5000 cena' o '5000 cena 15/01'")
-        return ConversationHandler.END
-
-    try:
-        monto = float(partes[0].replace(".", "").replace(",", "."))
-        fecha_iso, fecha_legible = parsear_fecha(texto)
-        detalle = texto.replace(partes[0], "", 1).strip()
-        if fecha_legible:
-            detalle = detalle.replace(fecha_legible, "").strip()
-
-        context.user_data["gasto"] = {
-            "monto":        monto,
-            "detalle":      detalle if detalle else "-",
-            "fecha":        fecha_iso,
-            "usuario":      update.message.from_user.first_name,
-            "metodo_pago":  "Efectivo",
-        }
-
-        markup = ReplyKeyboardMarkup(CATEGORIAS_TECLADO, one_time_keyboard=True, resize_keyboard=True)
-        txt_fecha = f" del {fecha_legible}" if fecha_legible else " de hoy"
-        await update.message.reply_text(
-            f"¿Categoría para ${monto}{txt_fecha} — '{detalle}'?",
-            reply_markup=markup
-        )
-        return ESPERANDO_CATEGORIA
-
-    except ValueError:
-        await update.message.reply_text("❌ El primer valor debe ser el monto.")
-        return ConversationHandler.END
-
-
-async def finalizar_registro(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    categoria = update.message.text
-    datos = context.user_data.get("gasto")
-    if not datos:
-        await update.message.reply_text("Hubo un error, empezá de nuevo.")
-        return ConversationHandler.END
-
-    datos["categoria"] = categoria
-    nuevo_id = generar_id()
-    fecha    = datos.get("fecha") or date.today().isoformat()
-    fila = [[nuevo_id, fecha, datos["monto"], datos["detalle"],
-             datos["categoria"], datos["usuario"], datos["metodo_pago"], ""]]
-    try:
-        await sheets_append(RANGE_GASTOS, fila)
-        await update.message.reply_text(
-            f"✅ Registrado: ${datos['monto']} en {categoria}",
-            reply_markup=ReplyKeyboardRemove()
-        )
-    except Exception as e:
-        await update.message.reply_text(f"❌ Error al guardar: {e}")
-    return ConversationHandler.END
-
-
-async def cancelar(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Cancelado.", reply_markup=ReplyKeyboardRemove())
-    return ConversationHandler.END
-
-
-tg_app = ApplicationBuilder().token(TOKEN_TG).build() if TOKEN_TG else None
-
-if tg_app:
-    conv_handler = ConversationHandler(
-        entry_points=[MessageHandler(filters.TEXT & (~filters.COMMAND), inicio_gasto)],
-        states={ESPERANDO_CATEGORIA: [MessageHandler(filters.TEXT & (~filters.COMMAND), finalizar_registro)]},
-        fallbacks=[CommandHandler("cancelar", cancelar)],
-    )
-    tg_app.add_handler(conv_handler)
-
-
 @app.post("/webhook/telegram")
 async def webhook_telegram(request: Request):
-    if not tg_app:
-        raise HTTPException(500, "Bot no configurado")
     body = await request.json()
-    update = Update.de_json(body, tg_app.bot)
+    message = body.get("message", {})
+    if not message:
+        return {"ok": True}
 
-    async def _run():
-        if not tg_app.running:
-            await tg_app.initialize()
-        await tg_app.process_update(update)
-        await tg_app.shutdown()
+    chat_id  = message["chat"]["id"]
+    username = message.get("from", {}).get("username", "")
+    text     = message.get("text", "").strip()
 
-    asyncio.run(_run())
+    if username not in USUARIOS_TG:
+        return {"ok": True}
+
+    # Si hay un gasto pendiente esperando categoría
+    if chat_id in ESPERANDO:
+        datos = ESPERANDO.pop(chat_id)
+        datos["categoria"] = text
+        nuevo_id = generar_id()
+        fecha    = datos.get("fecha") or date.today().isoformat()
+        fila = [[nuevo_id, fecha, datos["monto"], datos["detalle"],
+                 datos["categoria"], datos["usuario"], "Efectivo", ""]]
+        try:
+            await sheets_append(RANGE_GASTOS, fila)
+            tg_send(chat_id, f"✅ ${datos['monto']} en {text} registrado!")
+        except Exception as e:
+            tg_send(chat_id, f"❌ Error al guardar: {e}")
+        return {"ok": True}
+
+    # Parsear nuevo gasto
+    partes = text.split(" ")
+    try:
+        monto = float(partes[0].replace(".", "").replace(",", "."))
+    except (ValueError, IndexError):
+        tg_send(chat_id, "Enviame el gasto así: '5000 cena' o '5000 cena 15/04'")
+        return {"ok": True}
+
+    fecha_iso, fecha_legible = parsear_fecha(text)
+    detalle = text.replace(partes[0], "", 1).strip()
+    if fecha_legible:
+        detalle = detalle.replace(fecha_legible, "").strip()
+
+    ESPERANDO[chat_id] = {
+        "monto":   monto,
+        "detalle": detalle if detalle else "-",
+        "fecha":   fecha_iso,
+        "usuario": message.get("from", {}).get("first_name", "Flor"),
+    }
+
+    txt_fecha = f" del {fecha_legible}" if fecha_legible else " de hoy"
+    tg_send(
+        chat_id,
+        f"¿Categoría para ${monto}{txt_fecha} — '{detalle}'?",
+        keyboard=CATEGORIAS_TECLADO
+    )
     return {"ok": True}
