@@ -196,14 +196,10 @@ import urllib.request as _urllib
 ESPERANDO = {}  # estado en memoria por user_id
 
 CATEGORIAS_TECLADO = [
-    ["Supermercado", "Salidas", "Almuerzos"],
-    ["Transporte",   "Educación", "Remis"],
-    ["Servicios",    "Viajes",    "Hogar"],
-    ["Regalos",      "Mascota",   "Préstamos"],
-    ["Gimnasio",     "Deporte",   "Insumos"],
-    ["Alquiler",     "Salud",     "Alfarería"],
-    ["Farmacia",     "Cuidado personal", "Deuda"],
-    ["Indumentaria", "Kiosco",    "Otros"],
+    ["Supermercado", "Salidas",   "Transporte"],
+    ["Hogar",        "Belleza",   "Mascota"],
+    ["Viajes",       "Salud",     "Regalos"],
+    ["Actividad fisica", "Indumentaria", "Otros"],
 ]
 
 def tg_send(chat_id: int, text: str, keyboard=None):
