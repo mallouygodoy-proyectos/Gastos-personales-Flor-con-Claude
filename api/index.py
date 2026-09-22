@@ -2,6 +2,7 @@ import os
 import json
 import re
 import asyncio
+import urllib.request as _urllib
 from datetime import datetime, date
 from typing import Optional
 
@@ -10,17 +11,12 @@ import jwt
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
-from telegram.ext import (
-    ApplicationBuilder, ConversationHandler,
-    MessageHandler, CommandHandler, filters, ContextTypes
-)
 
 app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # en prod: reemplazá con tu dominio Vercel
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -46,15 +42,15 @@ def get_access_token() -> str:
         "scope": " ".join(SCOPES),
     }
     token = jwt.encode(payload, creds["private_key"], algorithm="RS256")
-    import urllib.request, urllib.parse
+    import urllib.parse
     data = urllib.parse.urlencode({
         "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
         "assertion": token
     }).encode()
-    req = urllib.request.Request(
+    req = _urllib.Request(
         "https://oauth2.googleapis.com/token", data=data, method="POST"
     )
-    with urllib.request.urlopen(req) as r:
+    with _urllib.urlopen(req) as r:
         return json.loads(r.read())["access_token"]
 
 
@@ -175,7 +171,6 @@ async def delete_gasto(gasto_id: str):
         if row and row[0] == gasto_id:
             fila_num = i + 1
             rng = f"GASTOS!A{fila_num}:H{fila_num}"
-            # Marcamos como eliminado sobreescribiendo con vacíos
             await sheets_update(rng, [["", "", "", "ELIMINADO", "", "", "", ""]])
             return {"status": "deleted"}
     raise HTTPException(404, "Gasto no encontrado")
@@ -191,16 +186,15 @@ async def get_categorias():
 
 
 # --- BOT TELEGRAM ---
-import urllib.request as _urllib
-
-ESPERANDO = {}  # estado en memoria por user_id
+ESPERANDO = {}  # estado en memoria por chat_id
 
 CATEGORIAS_TECLADO = [
-    ["Supermercado", "Salidas",   "Transporte"],
-    ["Hogar",        "Belleza",   "Mascota"],
-    ["Viajes",       "Salud",     "Regalos"],
+    ["Supermercado", "Salidas",       "Transporte"],
+    ["Hogar",        "Belleza",        "Mascota"],
+    ["Viajes",       "Salud",          "Regalos"],
     ["Actividad fisica", "Indumentaria", "Otros"],
 ]
+
 
 def tg_send(chat_id: int, text: str, keyboard=None):
     payload = {"chat_id": chat_id, "text": text}
@@ -222,6 +216,7 @@ def tg_send(chat_id: int, text: str, keyboard=None):
     with _urllib.urlopen(req) as r:
         return json.loads(r.read())
 
+
 def parsear_fecha(texto: str):
     match = re.search(r'(\d{1,2}/\d{1,2}(/\d{2,4})?)', texto)
     if match:
@@ -234,6 +229,7 @@ def parsear_fecha(texto: str):
             anio += 2000
         return datetime(anio, mes, dia).date().isoformat(), fecha_str
     return None, None
+
 
 @app.post("/webhook/telegram")
 async def webhook_telegram(request: Request):
@@ -259,7 +255,7 @@ async def webhook_telegram(request: Request):
                  datos["categoria"], datos["usuario"], "Efectivo", ""]]
         try:
             await sheets_append(RANGE_GASTOS, fila)
-            tg_send(chat_id, f"✅ ${datos['monto']} en {text} registrado!")
+            tg_send(chat_id, f"✅ ${int(datos['monto'])} en {text} registrado!")
         except Exception as e:
             tg_send(chat_id, f"❌ Error al guardar: {e}")
         return {"ok": True}
@@ -269,13 +265,16 @@ async def webhook_telegram(request: Request):
     try:
         monto = float(partes[0].replace(".", "").replace(",", "."))
     except (ValueError, IndexError):
-        tg_send(chat_id, "Enviame el gasto así: '5000 cena' o '5000 cena 15/04'")
+        tg_send(chat_id, "Enviame el gasto así:\n'5000 cena' o '5000 cena 15/04'")
         return {"ok": True}
 
     fecha_iso, fecha_legible = parsear_fecha(text)
     detalle = text.replace(partes[0], "", 1).strip()
     if fecha_legible:
         detalle = detalle.replace(fecha_legible, "").strip()
+
+    # Truncar detalle para que el mensaje no sea muy largo
+    detalle_corto = detalle[:25] + "…" if len(detalle) > 25 else detalle
 
     ESPERANDO[chat_id] = {
         "monto":   monto,
@@ -284,10 +283,10 @@ async def webhook_telegram(request: Request):
         "usuario": message.get("from", {}).get("first_name", "Flor"),
     }
 
-    txt_fecha = f" del {fecha_legible}" if fecha_legible else " de hoy"
+    txt_fecha = f" {fecha_legible}" if fecha_legible else ""
     tg_send(
         chat_id,
-        f"¿Categoría para ${monto}{txt_fecha} — '{detalle}'?",
+        f"${int(monto)}{txt_fecha} — {detalle_corto}\n¿Categoría?",
         keyboard=CATEGORIAS_TECLADO
     )
     return {"ok": True}
