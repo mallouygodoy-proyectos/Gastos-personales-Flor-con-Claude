@@ -1,7 +1,6 @@
 import os
 import json
 import re
-import asyncio
 import urllib.request as _urllib
 from datetime import datetime, date
 from typing import Optional
@@ -28,6 +27,8 @@ USUARIOS_TG     = os.getenv("USUARIOS_PERMITIDOS", "").split(",")
 SCOPES          = ["https://www.googleapis.com/auth/spreadsheets"]
 RANGE_GASTOS    = "GASTOS!A:H"
 RANGE_CATS      = "CATEGORIAS!A:C"
+RANGE_ESTADO    = "ESTADO!A:F"
+
 
 # --- SERVICE ACCOUNT JWT ---
 def get_access_token() -> str:
@@ -87,6 +88,46 @@ async def sheets_update(range_: str, values: list) -> dict:
         )
         r.raise_for_status()
         return r.json()
+
+
+# --- ESTADO PERSISTENTE EN SHEETS ---
+async def guardar_estado(chat_id: int, datos: dict):
+    """Guarda o actualiza el estado pendiente de un chat en la hoja ESTADO."""
+    rows = await sheets_get(RANGE_ESTADO)
+    chat_str = str(chat_id)
+    valor = json.dumps(datos)
+    # Buscar si ya existe una fila para este chat_id
+    for i, row in enumerate(rows):
+        if row and row[0] == chat_str:
+            fila_num = i + 1
+            await sheets_update(f"ESTADO!A{fila_num}:B{fila_num}", [[chat_str, valor]])
+            return
+    # Si no existe, agregar nueva fila
+    await sheets_append(RANGE_ESTADO, [[chat_str, valor]])
+
+
+async def leer_estado(chat_id: int) -> Optional[dict]:
+    """Lee el estado pendiente de un chat desde la hoja ESTADO."""
+    rows = await sheets_get(RANGE_ESTADO)
+    chat_str = str(chat_id)
+    for row in rows:
+        if row and row[0] == chat_str and len(row) > 1 and row[1]:
+            try:
+                return json.loads(row[1])
+            except Exception:
+                return None
+    return None
+
+
+async def borrar_estado(chat_id: int):
+    """Borra el estado pendiente de un chat en la hoja ESTADO."""
+    rows = await sheets_get(RANGE_ESTADO)
+    chat_str = str(chat_id)
+    for i, row in enumerate(rows):
+        if row and row[0] == chat_str:
+            fila_num = i + 1
+            await sheets_update(f"ESTADO!A{fila_num}:B{fila_num}", [["", ""]])
+            return
 
 
 # --- MODELOS ---
@@ -186,8 +227,6 @@ async def get_categorias():
 
 
 # --- BOT TELEGRAM ---
-ESPERANDO = {}  # estado en memoria por chat_id
-
 CATEGORIAS_TECLADO = [
     ["Supermercado", "Salidas",       "Transporte"],
     ["Hogar",        "Belleza",        "Mascota"],
@@ -231,6 +270,10 @@ def parsear_fecha(texto: str):
     return None, None
 
 
+# Lista de categorías válidas para distinguirlas de nuevos gastos
+CATEGORIAS_VALIDAS = {cat for fila in CATEGORIAS_TECLADO for cat in fila}
+
+
 @app.post("/webhook/telegram")
 async def webhook_telegram(request: Request):
     body = await request.json()
@@ -245,9 +288,12 @@ async def webhook_telegram(request: Request):
     if username not in USUARIOS_TG:
         return {"ok": True}
 
-    # Si hay un gasto pendiente esperando categoría
-    if chat_id in ESPERANDO:
-        datos = ESPERANDO.pop(chat_id)
+    # Verificar si hay un gasto pendiente esperando categoría en Sheets
+    datos = await leer_estado(chat_id)
+
+    if datos and text in CATEGORIAS_VALIDAS:
+        # El usuario eligió categoría → registrar el gasto
+        await borrar_estado(chat_id)
         datos["categoria"] = text
         nuevo_id = generar_id()
         fecha    = datos.get("fecha") or date.today().isoformat()
@@ -273,15 +319,20 @@ async def webhook_telegram(request: Request):
     if fecha_legible:
         detalle = detalle.replace(fecha_legible, "").strip()
 
-    # Truncar detalle para que el mensaje no sea muy largo
     detalle_corto = detalle[:25] + "…" if len(detalle) > 25 else detalle
 
-    ESPERANDO[chat_id] = {
+    estado = {
         "monto":   monto,
         "detalle": detalle if detalle else "-",
         "fecha":   fecha_iso,
         "usuario": message.get("from", {}).get("first_name", "Flor"),
     }
+
+    try:
+        await guardar_estado(chat_id, estado)
+    except Exception as e:
+        tg_send(chat_id, f"❌ Error interno: {e}")
+        return {"ok": True}
 
     txt_fecha = f" {fecha_legible}" if fecha_legible else ""
     tg_send(
