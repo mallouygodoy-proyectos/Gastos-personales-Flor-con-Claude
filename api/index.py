@@ -301,7 +301,7 @@ async def webhook_telegram(request: Request):
                  datos["categoria"], datos["usuario"], "Efectivo", ""]]
         try:
             await sheets_append(RANGE_GASTOS, fila)
-            tg_send(chat_id, f"✅ ${int(datos['monto'])} en {text} registrado!")
+            tg_send(chat_id, f"Listo! ${int(float(datos['monto']))} - {str(text)[:20]}")
         except Exception as e:
             tg_send(chat_id, f"❌ Error al guardar: {e}")
         return {"ok": True}
